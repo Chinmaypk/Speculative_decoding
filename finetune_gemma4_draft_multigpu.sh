@@ -1,20 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Edit these values, or pass them as environment variables before running.
+# Multi-GPU launcher. Run from Linux/WSL with CUDA visible.
 # Example:
-#   TARGET_MODEL=/models/my-gemma4-e2b-it TRAIN_FILE=data/train.jsonl ./finetune_gemma4_draft.sh
+#   NUM_PROCESSES=4 TARGET_MODEL=/models/my-gemma4-e2b-it TRAIN_FILE=data/train.jsonl ./finetune_gemma4_draft_multigpu.sh
 
 TARGET_MODEL="${TARGET_MODEL:-/path/to/your-finetuned-gemma-4-E2B-it}"
 DRAFT_MODEL="${DRAFT_MODEL:-google/gemma-4-E2B-it-assistant}"
 TRAIN_FILE="${TRAIN_FILE:-data/train.jsonl}"
 EVAL_FILE="${EVAL_FILE:-}"
-OUTPUT_DIR="${OUTPUT_DIR:-outputs/gemma4-e2b-assistant-distilled}"
+OUTPUT_DIR="${OUTPUT_DIR:-outputs/gemma4-e2b-assistant-distilled-multigpu}"
 SAVE_FINAL_DIR="${SAVE_FINAL_DIR:-$OUTPUT_DIR/final_drafter}"
 
+NUM_PROCESSES="${NUM_PROCESSES:-2}"
+MIXED_PRECISION="${MIXED_PRECISION:-bf16}"
 MAX_LENGTH="${MAX_LENGTH:-2048}"
 PER_DEVICE_BATCH_SIZE="${PER_DEVICE_BATCH_SIZE:-1}"
-GRADIENT_ACCUMULATION_STEPS="${GRADIENT_ACCUMULATION_STEPS:-16}"
+GRADIENT_ACCUMULATION_STEPS="${GRADIENT_ACCUMULATION_STEPS:-8}"
 LEARNING_RATE="${LEARNING_RATE:-2e-5}"
 NUM_TRAIN_EPOCHS="${NUM_TRAIN_EPOCHS:-1}"
 WARMUP_RATIO="${WARMUP_RATIO:-0.03}"
@@ -49,7 +51,7 @@ args=(
   --train-file "$TRAIN_FILE"
   --output-dir "$OUTPUT_DIR"
   --save-final-dir "$SAVE_FINAL_DIR"
-  --training-mode single_gpu
+  --training-mode multi_gpu
   --max-length "$MAX_LENGTH"
   --per-device-train-batch-size "$PER_DEVICE_BATCH_SIZE"
   --gradient-accumulation-steps "$GRADIENT_ACCUMULATION_STEPS"
@@ -86,4 +88,7 @@ if [[ -n "$GRADIENT_CHECKPOINTING_FLAG" ]]; then
   args+=("$GRADIENT_CHECKPOINTING_FLAG")
 fi
 
-python scripts/train_gemma4_draft.py "${args[@]}"
+accelerate launch \
+  --num_processes "$NUM_PROCESSES" \
+  --mixed_precision "$MIXED_PRECISION" \
+  scripts/train_gemma4_draft.py "${args[@]}"

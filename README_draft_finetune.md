@@ -33,24 +33,67 @@ one of these shapes:
 
 For chat data, the target model processor applies the Gemma 4 chat template.
 
-## Run
+## Single-GPU Training
 
 ```bash
-python scripts/train_gemma4_draft.py \
-  --target-model /path/to/your-finetuned-gemma-4-E2B-it \
-  --draft-model google/gemma-4-E2B-it-assistant \
-  --train-file data/train.jsonl \
-  --eval-file data/valid.jsonl \
-  --output-dir outputs/gemma4-e2b-assistant-distilled \
-  --bf16 \
-  --use-lora \
-  --per-device-train-batch-size 1 \
-  --gradient-accumulation-steps 16 \
-  --learning-rate 2e-5 \
-  --num-train-epochs 1
+TARGET_MODEL=/path/to/your-finetuned-gemma-4-E2B-it \
+TRAIN_FILE=data/train.jsonl \
+EVAL_FILE=data/valid.jsonl \
+OUTPUT_DIR=outputs/gemma4-e2b-assistant-distilled \
+./finetune_gemma4_draft.sh
+```
+
+The single-GPU wrapper calls:
+
+```bash
+python scripts/train_gemma4_draft.py ... --training-mode single_gpu
+```
+
+## Multi-GPU Training
+
+Use `accelerate` for proper multi-process training:
+
+```bash
+NUM_PROCESSES=4 \
+TARGET_MODEL=/path/to/your-finetuned-gemma-4-E2B-it \
+TRAIN_FILE=data/train.jsonl \
+EVAL_FILE=data/valid.jsonl \
+OUTPUT_DIR=outputs/gemma4-e2b-assistant-distilled-multigpu \
+./finetune_gemma4_draft_multigpu.sh
 ```
 
 For a full assistant fine-tune, omit `--use-lora`, but expect higher VRAM use.
+In multi-GPU mode each process loads both the frozen target and trainable
+drafter, so LoRA is the practical default.
+
+## Logs and Saved Drafter
+
+The trainer prints debug lines with the `[gemma4-draft]` prefix, and Hugging
+Face Trainer prints step loss in the terminal. Extra distillation metrics are
+logged as:
+
+- `train/kl_loss`
+- `train/ce_loss`
+- `train/active_tokens`
+
+TensorBoard logs are written to:
+
+```text
+<OUTPUT_DIR>/tensorboard
+```
+
+Launch TensorBoard with:
+
+```bash
+tensorboard --logdir outputs
+```
+
+The drafter is saved in two places:
+
+```text
+<OUTPUT_DIR>
+<OUTPUT_DIR>/final_drafter
+```
 
 ## Smoke Test
 
@@ -86,3 +129,22 @@ python scripts/check_gemma4_draft.py \
   --assistant-model outputs/gemma4-e2b-assistant-distilled \
   --bf16
 ```
+
+## vLLM Speculative Inference
+
+For vLLM, Gemma 4 assistant checkpoints should be used as MTP speculators:
+
+```bash
+pip install -r requirements-vllm.txt
+
+python scripts/vllm_speculative_infer.py \
+  --target-model /path/to/your-finetuned-gemma-4-E2B-it \
+  --drafter-model outputs/gemma4-e2b-assistant-distilled \
+  --num-speculative-tokens 3 \
+  --tensor-parallel-size 1 \
+  --dtype bfloat16 \
+  --prompt "Write a short Python function that reverses a string."
+```
+
+If you trained the assistant with LoRA, merge the LoRA adapter into the assistant
+base model before passing it to vLLM as `--drafter-model`.
