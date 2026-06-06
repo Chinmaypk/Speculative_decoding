@@ -1,0 +1,8 @@
+torch>=2.3
+transformers>=4.53
+accelerate>=0.34
+datasets>=2.20
+peft>=0.12
+safetensors>=0.4.3
+huggingface-hub>=0.24
+tqdm>=4.66
