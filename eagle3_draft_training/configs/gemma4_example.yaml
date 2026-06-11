@@ -1,0 +1,39 @@
+# Example configuration for training an EAGLE-3-style drafter on Gemma.
+# Replace model_name_or_path with your actual Gemma 4 or fine-tuned Gemma checkpoint.
+
+model_name_or_path: google/gemma-4-e2b-it
+train_data_dir: data/tokenized/gemma4
+output_dir: outputs/gemma4_eagle3_draft
+
+# Use low, middle, and high target hidden states.
+# Adjust these for the exact depth of your Gemma checkpoint.
+target_hidden_layer_indices: [8, 16, 26]
+
+max_length: 2048
+draft_hidden_size: 1024
+draft_num_layers: 4
+draft_num_heads: 8
+draft_intermediate_size: 4096
+dropout: 0.0
+
+learning_rate: 0.0002
+weight_decay: 0.01
+warmup_steps: 100
+gradient_accumulation_steps: 4
+per_device_train_batch_size: 1
+num_train_epochs: 1
+max_steps: -1
+logging_steps: 10
+save_steps: 500
+seed: 42
+
+bf16: true
+fp16: false
+
+# Scheduled sampling probability for replacing some previous ground-truth tokens
+# with drafter predictions during training. Start with 0.0 for stability.
+scheduled_sampling_prob: 0.0
+
+# Optional memory helpers.
+gradient_checkpointing: true
+trust_remote_code: true
