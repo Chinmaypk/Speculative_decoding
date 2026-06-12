@@ -4,6 +4,10 @@
 Expected input format, one JSON object per line:
   {"response_text": "...", "genui_json": {...}}
 
+Usage:
+  - Pass --train_jsonl for training data. It is split into train/eval.
+  - Optionally pass --test_jsonl for a separate held-out test set.
+
 The model receives `response_text` as the prompt/input and learns to generate
 `genui_json` as the supervised target. Prompt tokens are masked with -100.
 """
@@ -73,6 +77,29 @@ def encode_example(record: dict[str, Any], tokenizer: AutoTokenizer, max_length:
     }
 
 
+def load_jsonl_examples(
+    jsonl_path: str | Path,
+    tokenizer: AutoTokenizer,
+    max_length: int,
+    system_prompt: str,
+    split_name: str,
+) -> list[dict[str, Any]]:
+    examples: list[dict[str, Any]] = []
+    with open(jsonl_path, "r", encoding="utf-8") as f:
+        for line_number, line in enumerate(tqdm(f, desc=f"Tokenizing {split_name}"), start=1):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                record = json.loads(line)
+                example = encode_example(record, tokenizer, max_length, system_prompt)
+            except Exception as exc:
+                raise ValueError(f"Failed to parse {jsonl_path} line {line_number}: {exc}") from exc
+            if example is not None:
+                examples.append(example)
+    return examples
+
+
 def save_split(examples: list[dict[str, Any]], output_dir: Path, name: str) -> None:
     split_dir = output_dir / name
     split_dir.mkdir(parents=True, exist_ok=True)
@@ -83,58 +110,65 @@ def save_split(examples: list[dict[str, Any]], output_dir: Path, name: str) -> N
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--assistant_model_path", required=True, help="Frozen assistant/target model path used for tokenization.")
-    parser.add_argument("--input_jsonl", required=True)
+    parser.add_argument("--target_model_path", required=True, help="Target model path used for tokenizer/vocabulary.")
+    parser.add_argument("--train_jsonl", required=True, help="Training JSONL. This is split into train/eval only.")
+    parser.add_argument("--test_jsonl", default=None, help="Optional separate held-out test JSONL. Not mixed into train/eval.")
     parser.add_argument("--output_dir", required=True)
     parser.add_argument("--max_length", type=int, default=2048)
     parser.add_argument("--eval_ratio", type=float, default=0.05)
-    parser.add_argument("--test_ratio", type=float, default=0.05)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--system_prompt", default=DEFAULT_SYSTEM_PROMPT)
     parser.add_argument("--trust_remote_code", action="store_true")
     args = parser.parse_args()
 
+    if not 0.0 <= args.eval_ratio < 1.0:
+        raise ValueError("--eval_ratio must be >= 0.0 and < 1.0")
+
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     tokenizer = AutoTokenizer.from_pretrained(
-        args.assistant_model_path,
+        args.target_model_path,
         trust_remote_code=args.trust_remote_code,
         use_fast=True,
     )
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    examples: list[dict[str, Any]] = []
-    with open(args.input_jsonl, "r", encoding="utf-8") as f:
-        for line in tqdm(f, desc="Tokenizing response_text -> genui_json"):
-            line = line.strip()
-            if not line:
-                continue
-            record = json.loads(line)
-            example = encode_example(record, tokenizer, args.max_length, args.system_prompt)
-            if example is not None:
-                examples.append(example)
+    train_source_examples = load_jsonl_examples(
+        args.train_jsonl,
+        tokenizer,
+        args.max_length,
+        args.system_prompt,
+        split_name="train_jsonl",
+    )
+    if not train_source_examples:
+        raise ValueError("No valid examples were produced from --train_jsonl.")
 
-    if not examples:
-        raise ValueError("No valid examples were produced from the JSONL file.")
-
-    random.Random(args.seed).shuffle(examples)
-    n_total = len(examples)
-    n_test = int(n_total * args.test_ratio)
+    random.Random(args.seed).shuffle(train_source_examples)
+    n_total = len(train_source_examples)
     n_eval = int(n_total * args.eval_ratio)
-    test_examples = examples[:n_test]
-    eval_examples = examples[n_test : n_test + n_eval]
-    train_examples = examples[n_test + n_eval :]
+    eval_examples = train_source_examples[:n_eval]
+    train_examples = train_source_examples[n_eval:]
 
     if not train_examples:
-        train_examples = examples
+        train_examples = train_source_examples
         eval_examples = []
-        test_examples = []
+
+    test_examples: list[dict[str, Any]] = []
+    if args.test_jsonl:
+        test_examples = load_jsonl_examples(
+            args.test_jsonl,
+            tokenizer,
+            args.max_length,
+            args.system_prompt,
+            split_name="test_jsonl",
+        )
 
     save_split(train_examples, output_dir, "train")
     save_split(eval_examples, output_dir, "eval")
-    save_split(test_examples, output_dir, "test")
+    if args.test_jsonl:
+        save_split(test_examples, output_dir, "test")
     tokenizer.save_pretrained(output_dir / "tokenizer")
 
     print(
