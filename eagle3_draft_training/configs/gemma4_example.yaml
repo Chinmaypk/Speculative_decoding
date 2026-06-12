@@ -1,7 +1,9 @@
 # Example configuration for training an EAGLE-3-style drafter on Gemma.
-# This is the frozen assistant/target model used for tokenization, hidden states, and embeddings.
+# assistant_model_path is your existing assistant model.
+# target_model_path is the frozen target model used for hidden states/embeddings.
 
-assistant_model_path: google/gemma-4-e2b-it
+assistant_model_path: /home/c.kulkarni/hf_models/google/gemma-4-E2B-it-assistant
+target_model_path: /home/c.kulkarni/hf_models/google/gemma-4-E2B-it
 train_data_dir: data/tokenized/gemma4/train
 eval_data_dir: data/tokenized/gemma4/eval
 test_data_dir: data/tokenized/gemma4/test
@@ -12,7 +14,7 @@ tensorboard_log_dir: outputs/gemma4_eagle3_draft/tensorboard
 # It can point to either a checkpoint directory or directly to draft_model.pt.
 resume_draft_checkpoint_path:
 
-# Use low, middle, and high target hidden states from the assistant model.
+# Use low, middle, and high target hidden states from target_model_path.
 # You can auto-overwrite this using scripts/configure_from_assistant.py.
 target_hidden_layer_indices: [8, 16, 26]
 
