@@ -13,9 +13,13 @@ class Eagle3TrainingConfig:
     output_dir: str
     target_hidden_layer_indices: list[int]
 
-    # Preferred name: this is the frozen assistant/target model path used for
-    # tokenization, hidden states, and embeddings.
+    # The existing assistant model path. Kept separate for clarity and future
+    # assisted-generation integration.
     assistant_model_path: str | None = None
+
+    # The frozen target model used for tokenization, hidden states, embeddings,
+    # vocabulary size, and drafter supervision.
+    target_model_path: str | None = None
 
     # Deprecated fallback kept only for older config files.
     model_name_or_path: str | None = None
@@ -62,19 +66,29 @@ class Eagle3TrainingConfig:
         if unknown:
             raise ValueError(f"Unknown config keys: {sorted(unknown)}")
         cfg = cls(**raw)
-        if cfg.assistant_model_path is None and cfg.model_name_or_path is not None:
-            cfg.assistant_model_path = cfg.model_name_or_path
-        if cfg.assistant_model_path is None:
-            raise ValueError("Set 'assistant_model_path' in the YAML config.")
+
+        # Backward compatibility: older configs used model_name_or_path for the
+        # model that produced hidden states. That is now target_model_path.
+        if cfg.target_model_path is None and cfg.model_name_or_path is not None:
+            cfg.target_model_path = cfg.model_name_or_path
+        if cfg.target_model_path is None and cfg.assistant_model_path is not None:
+            cfg.target_model_path = cfg.assistant_model_path
+        if cfg.target_model_path is None:
+            raise ValueError("Set 'target_model_path' in the YAML config.")
         return cfg
 
     @property
-    def resolved_assistant_model_path(self) -> str:
-        if self.assistant_model_path is None:
-            raise ValueError("assistant_model_path is not configured.")
+    def resolved_target_model_path(self) -> str:
+        if self.target_model_path is None:
+            raise ValueError("target_model_path is not configured.")
+        return self.target_model_path
+
+    @property
+    def resolved_assistant_model_path(self) -> str | None:
         return self.assistant_model_path
 
     def to_dict(self) -> dict[str, Any]:
         data = {field.name: getattr(self, field.name) for field in fields(self)}
+        data["resolved_target_model_path"] = self.resolved_target_model_path
         data["resolved_assistant_model_path"] = self.resolved_assistant_model_path
         return data
