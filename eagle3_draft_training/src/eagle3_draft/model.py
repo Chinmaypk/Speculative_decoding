@@ -4,18 +4,10 @@ import torch
 import torch.nn as nn
 from transformers import PretrainedConfig
 
+from .config_utils import get_hidden_size, get_vocab_size
+
 
 class Eagle3DraftModel(nn.Module):
-    """Lightweight EAGLE-3-style drafter.
-
-    Inputs:
-      - selected hidden states from a frozen target model;
-      - previous token embeddings from the target model embedding table.
-
-    Output:
-      - next-token logits over the target vocabulary.
-    """
-
     def __init__(
         self,
         target_config: PretrainedConfig,
@@ -28,8 +20,8 @@ class Eagle3DraftModel(nn.Module):
     ) -> None:
         super().__init__()
         self.target_hidden_layer_indices = target_hidden_layer_indices
-        self.target_hidden_size = int(getattr(target_config, "hidden_size"))
-        self.vocab_size = int(getattr(target_config, "vocab_size"))
+        self.target_hidden_size = get_hidden_size(target_config)
+        self.vocab_size = get_vocab_size(target_config)
         self.draft_hidden_size = draft_hidden_size
 
         self.hidden_projections = nn.ModuleList(
@@ -37,7 +29,6 @@ class Eagle3DraftModel(nn.Module):
         )
         self.token_projection = nn.Linear(self.target_hidden_size, draft_hidden_size, bias=False)
         self.fusion_norm = nn.LayerNorm(draft_hidden_size)
-
         encoder_layer = nn.TransformerEncoderLayer(
             d_model=draft_hidden_size,
             nhead=draft_num_heads,
@@ -58,38 +49,20 @@ class Eagle3DraftModel(nn.Module):
         attention_mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
         if len(selected_hidden_states) != len(self.hidden_projections):
-            raise ValueError(
-                f"Expected {len(self.hidden_projections)} hidden states, got {len(selected_hidden_states)}"
-            )
-
+            raise ValueError(f"Expected {len(self.hidden_projections)} hidden states, got {len(selected_hidden_states)}")
         fused = self.token_projection(previous_token_embeddings)
         for hidden, projection in zip(selected_hidden_states, self.hidden_projections):
             fused = fused + projection(hidden)
-        fused = fused / (len(selected_hidden_states) + 1)
-        fused = self.fusion_norm(fused)
-
+        fused = self.fusion_norm(fused / (len(selected_hidden_states) + 1))
         seq_len = fused.size(1)
-        causal_mask = torch.triu(
-            torch.ones(seq_len, seq_len, device=fused.device, dtype=torch.bool),
-            diagonal=1,
-        )
-        key_padding_mask = None
-        if attention_mask is not None:
-            key_padding_mask = attention_mask == 0
-
-        hidden = self.blocks(
-            fused,
-            mask=causal_mask,
-            src_key_padding_mask=key_padding_mask,
-            is_causal=True,
-        )
-        hidden = self.final_norm(hidden)
-        return self.lm_head(hidden)
+        causal_mask = torch.triu(torch.ones(seq_len, seq_len, device=fused.device, dtype=torch.bool), diagonal=1)
+        key_padding_mask = attention_mask == 0 if attention_mask is not None else None
+        hidden = self.blocks(fused, mask=causal_mask, src_key_padding_mask=key_padding_mask, is_causal=True)
+        return self.lm_head(self.final_norm(hidden))
 
     def save_config(self, output_dir: str) -> None:
         import json
         from pathlib import Path
-
         Path(output_dir).mkdir(parents=True, exist_ok=True)
         with open(Path(output_dir) / "draft_config.json", "w", encoding="utf-8") as f:
             json.dump(
