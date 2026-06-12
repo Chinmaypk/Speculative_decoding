@@ -1,9 +1,10 @@
 #!/usr/bin/env python
-"""Inspect an assistant model and overwrite drafter config safely.
+"""Inspect target/assistant models and overwrite drafter config safely.
 
 Example:
   python scripts/configure_from_assistant.py \
-    --assistant_model_path /path/to/assistant_model \
+    --assistant_model_path /home/c.kulkarni/hf_models/google/gemma-4-E2B-it-assistant \
+    --target_model_path /home/c.kulkarni/hf_models/google/gemma-4-E2B-it \
     --config configs/gemma4_example.yaml \
     --overwrite
 """
@@ -48,7 +49,7 @@ def pick_layer_indices(num_layers: int) -> list[int]:
 
 
 def choose_draft_width(hidden_size: int) -> int:
-    """Choose a compact drafter width from assistant-model hidden size."""
+    """Choose a compact drafter width from target-model hidden size."""
     if hidden_size <= 1024:
         return hidden_size
     raw = min(2048, max(1024, hidden_size // 2))
@@ -62,8 +63,8 @@ def choose_num_heads(draft_hidden_size: int) -> int:
     return 1
 
 
-def inspect_model(assistant_model_path: str, trust_remote_code: bool) -> dict[str, Any]:
-    cfg = AutoConfig.from_pretrained(assistant_model_path, trust_remote_code=trust_remote_code)
+def inspect_model(target_model_path: str, assistant_model_path: str | None, trust_remote_code: bool) -> dict[str, Any]:
+    cfg = AutoConfig.from_pretrained(target_model_path, trust_remote_code=trust_remote_code)
     hidden_size = int(getattr(cfg, "hidden_size"))
     vocab_size = int(getattr(cfg, "vocab_size"))
     num_layers = int(getattr(cfg, "num_hidden_layers"))
@@ -72,14 +73,15 @@ def inspect_model(assistant_model_path: str, trust_remote_code: bool) -> dict[st
     return {
         "model_type": getattr(cfg, "model_type", None),
         "architectures": getattr(cfg, "architectures", None),
-        "assistant_hidden_size": hidden_size,
-        "assistant_vocab_size": vocab_size,
-        "assistant_num_hidden_layers": num_layers,
-        "assistant_num_attention_heads": getattr(cfg, "num_attention_heads", None),
-        "assistant_num_key_value_heads": getattr(cfg, "num_key_value_heads", None),
-        "assistant_intermediate_size": getattr(cfg, "intermediate_size", None),
+        "target_hidden_size": hidden_size,
+        "target_vocab_size": vocab_size,
+        "target_num_hidden_layers": num_layers,
+        "target_num_attention_heads": getattr(cfg, "num_attention_heads", None),
+        "target_num_key_value_heads": getattr(cfg, "num_key_value_heads", None),
+        "target_intermediate_size": getattr(cfg, "intermediate_size", None),
         "recommended": {
             "assistant_model_path": assistant_model_path,
+            "target_model_path": target_model_path,
             "target_hidden_layer_indices": pick_layer_indices(num_layers),
             "draft_hidden_size": draft_hidden_size,
             "draft_num_heads": draft_num_heads,
@@ -100,13 +102,14 @@ def update_yaml_config(config_path: Path, model_info: dict[str, Any]) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--assistant_model_path", required=True)
+    parser.add_argument("--target_model_path", required=True)
+    parser.add_argument("--assistant_model_path", default=None)
     parser.add_argument("--config", default="configs/gemma4_example.yaml")
     parser.add_argument("--trust_remote_code", action="store_true")
     parser.add_argument("--overwrite", action="store_true", help="Overwrite the YAML config with recommended values.")
     args = parser.parse_args()
 
-    info = inspect_model(args.assistant_model_path, args.trust_remote_code)
+    info = inspect_model(args.target_model_path, args.assistant_model_path, args.trust_remote_code)
     print(yaml.safe_dump(info, sort_keys=False))
 
     if args.overwrite:
