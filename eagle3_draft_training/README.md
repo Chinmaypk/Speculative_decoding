@@ -2,7 +2,13 @@
 
 This folder contains a compact, Gemma-compatible training recipe for an EAGLE-3-style draft model.
 
-It is intentionally independent from the upstream `SafeAILab/EAGLE` codebase so it can be adapted to new target models such as Gemma without copying target-model-specific internals.
+## Naming convention
+
+- `assistant_model_path`: path or Hugging Face ID of the **frozen assistant/target model**. This model is used for tokenization, hidden states, and embeddings.
+- `target_model`: the in-memory frozen model object created from `assistant_model_path`.
+- `resume_draft_checkpoint_path`: path to an existing **drafter** checkpoint if you want to continue fine-tuning the draft model.
+
+Older configs using `model_name_or_path` still load as a fallback, but new configs should use `assistant_model_path` to avoid confusion.
 
 ## What is implemented
 
@@ -13,13 +19,13 @@ EAGLE-3 changes the earlier EAGLE idea in two important ways:
 
 This implementation follows those ideas:
 
-- freezes the target/assistant model;
+- freezes the assistant/target model;
 - reads hidden states from configurable target layers;
 - fuses selected layers through learned projections;
 - conditions on the previous token embedding;
 - trains a lightweight Transformer drafter to predict the target `genui_json` tokens;
 - supports supervised JSONL data with `response_text` as input and `genui_json` as output;
-- supports train/eval/test splits, TensorBoard logging, standalone evaluation, generation testing, and resuming/fine-tuning an existing drafter checkpoint.
+- supports train/eval/test splits, TensorBoard logging, standalone evaluation, generation testing, assistant-model auto-configuration, and resuming/fine-tuning an existing drafter checkpoint.
 
 ## Folder layout
 
@@ -30,6 +36,7 @@ eagle3_draft_training/
   configs/
     gemma4_example.yaml
   scripts/
+    configure_from_assistant.py
     prepare_jsonl.py
     train_gemma4_eagle3.sh
   src/eagle3_draft/
@@ -51,11 +58,36 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Login to Hugging Face if the target model checkpoint is gated:
+Login to Hugging Face if the assistant model checkpoint is gated:
 
 ```bash
 huggingface-cli login
 ```
+
+## Auto-configure from your assistant model
+
+If you already have a fine-tuned assistant model, run:
+
+```bash
+python scripts/configure_from_assistant.py \
+  --assistant_model_path /path/to/your/assistant_model \
+  --config configs/gemma4_example.yaml \
+  --trust_remote_code \
+  --overwrite
+```
+
+This inspects the assistant model config and overwrites the YAML values for:
+
+```yaml
+assistant_model_path
+target_hidden_layer_indices
+draft_hidden_size
+draft_num_heads
+draft_num_layers
+draft_intermediate_size
+```
+
+The utility chooses low/mid/high hidden-state indices based on `num_hidden_layers`, so you do not need to manually guess valid Gemma/Gemma-like layer indices.
 
 ## Expected training data
 
@@ -71,7 +103,7 @@ Each JSONL line must be one JSON object with these keys:
 
 ```bash
 python scripts/prepare_jsonl.py \
-  --model_name_or_path google/gemma-4-e2b-it \
+  --assistant_model_path /path/to/your/assistant_model \
   --input_jsonl data/raw/train.jsonl \
   --output_dir data/tokenized/gemma4 \
   --max_length 2048 \
@@ -87,8 +119,6 @@ data/tokenized/gemma4/train/data.pt
 data/tokenized/gemma4/eval/data.pt
 data/tokenized/gemma4/test/data.pt
 ```
-
-Change `google/gemma-4-e2b-it` to your actual assistant/target model path or Hugging Face checkpoint.
 
 ## Train with TensorBoard logging
 
@@ -156,10 +186,10 @@ python -m eagle3_draft.test_generation \
 
 ## Fine-tuning from an existing assistant/drafter checkpoint
 
-Yes, if you already have an assistant/target model path, set:
+If you already have an assistant/target model path, set:
 
 ```yaml
-model_name_or_path: /path/to/your/assistant_model
+assistant_model_path: /path/to/your/assistant_model
 ```
 
 If you already have a trained drafter checkpoint and want to continue fine-tuning it, set:
@@ -172,7 +202,7 @@ That path can be either a checkpoint folder or the direct file path to `draft_mo
 
 ## Important notes
 
-- This trains the **draft / drafter model**, not the full target model.
-- The target/assistant model is frozen and is only used to produce hidden states and embeddings.
+- This trains the **draft / drafter model**, not the full assistant/target model.
+- The assistant/target model is frozen and is only used to produce hidden states and embeddings.
 - For production-grade serving, you still need integration with a verification engine such as SGLang, vLLM, or a custom speculative decoding loop.
 - Official EAGLE-3 serving frameworks may expect checkpoint metadata/tree configs that are different from this lightweight trainer. Treat this folder as a training starting point.
