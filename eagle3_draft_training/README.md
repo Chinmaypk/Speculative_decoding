@@ -20,12 +20,7 @@ target_model_path: /home/c.kulkarni/hf_models/google/gemma-4-E2B-it
 
 ## What is implemented
 
-EAGLE-3 changes the earlier EAGLE idea in two important ways:
-
-1. **Direct token prediction**: the drafter predicts next-token logits directly instead of predicting only top-layer features.
-2. **Multi-layer feature fusion**: the drafter uses low-, middle-, and high-level hidden states from the frozen target model.
-
-This implementation follows those ideas:
+This implementation:
 
 - freezes the target model;
 - reads hidden states from configurable target layers;
@@ -34,43 +29,47 @@ This implementation follows those ideas:
 - trains a lightweight Transformer drafter to predict the target `genui_json` tokens;
 - supports supervised JSONL data with `response_text` as input and `genui_json` as output;
 - splits only the training JSONL into train/eval and supports a separate held-out test JSONL;
+- saves `best-checkpoint` using the lowest validation loss;
+- can save test predictions inside the best checkpoint folder;
 - supports TensorBoard logging, standalone evaluation, generation testing, target-model auto-configuration, and resuming/fine-tuning an existing drafter checkpoint.
 
-## Folder layout
+## Recommended one-file run
+
+Edit the variables at the top of:
+
+```bash
+scripts/train_gemma4_eagle3.sh
+```
+
+Then run:
+
+```bash
+bash scripts/train_gemma4_eagle3.sh
+```
+
+The script can run data preparation, training, evaluation, and prediction export from one place.
+
+## Best checkpoint output
+
+During training, validation loss is monitored. Whenever `eval_loss` improves, the drafter is saved to:
 
 ```text
-eagle3_draft_training/
-  README.md
-  requirements.txt
-  configs/
-    gemma4_example.yaml
-  scripts/
-    configure_from_assistant.py
-    prepare_jsonl.py
-    train_gemma4_eagle3.sh
-  src/eagle3_draft/
-    __init__.py
-    config.py
-    data.py
-    eval.py
-    model.py
-    test_generation.py
-    train.py
+outputs/gemma4_eagle3_draft/best-checkpoint/
 ```
 
-## Install
+This folder contains:
 
-```bash
-cd eagle3_draft_training
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+```text
+draft_model.pt
+draft_config.json
+training_config.json
+best_metrics.json
 ```
 
-Login to Hugging Face if either model checkpoint is gated:
+If `TEST_JSONL` is set and `SAVE_TEST_PREDICTIONS="true"` in the bash file, test predictions are saved into the same folder:
 
-```bash
-huggingface-cli login
+```text
+outputs/gemma4_eagle3_draft/best-checkpoint/test_predictions.jsonl
 ```
 
 ## Auto-configure from your target model
@@ -96,7 +95,7 @@ draft_num_layers
 draft_intermediate_size
 ```
 
-The utility chooses low/mid/high hidden-state indices based on the target model `num_hidden_layers`, so you do not need to manually guess valid Gemma/Gemma-like layer indices.
+The utility chooses low/mid/high hidden-state indices based on the target model `num_hidden_layers`, including nested Gemma-style config fields.
 
 ## Expected JSONL format
 
@@ -108,9 +107,9 @@ Each JSONL line must be one JSON object with these keys:
 
 `response_text` is used as the input/prompt. `genui_json` is used as the supervised output. During training, prompt tokens are masked with `-100`, so loss is computed only on output JSON tokens.
 
-## Prepare data
+## Prepare data manually
 
-Pass one JSONL for training. The script splits this into `train` and `eval` using `--eval_ratio`. Pass a second JSONL only when you want a separate held-out test set.
+The bash file can do this automatically. Manual command:
 
 ```bash
 python scripts/prepare_jsonl.py \
@@ -123,8 +122,6 @@ python scripts/prepare_jsonl.py \
   --trust_remote_code
 ```
 
-The preprocessing tokenizer should match the target model vocabulary, so use `target_model_path` here.
-
 This creates:
 
 ```text
@@ -135,16 +132,10 @@ data/tokenized/gemma4/test/data.pt    # from test_jsonl, if provided
 
 If `--test_jsonl` is omitted, only train/eval are created.
 
-## Train with TensorBoard logging
+## Train manually
 
 ```bash
-bash scripts/train_gemma4_eagle3.sh configs/gemma4_example.yaml
-```
-
-or directly:
-
-```bash
-accelerate launch -m eagle3_draft.train --config configs/gemma4_example.yaml
+accelerate launch -m eagle3_draft.train --config configs/gemma4_runtime.yaml
 ```
 
 TensorBoard logs are written to:
@@ -173,38 +164,38 @@ Logged metrics include:
 
 ```bash
 python -m eagle3_draft.eval \
-  --config configs/gemma4_example.yaml \
-  --checkpoint_path outputs/gemma4_eagle3_draft/checkpoint-500 \
+  --config configs/gemma4_runtime.yaml \
+  --checkpoint_path outputs/gemma4_eagle3_draft/best-checkpoint \
   --data_dir data/tokenized/gemma4/test
 ```
 
 ## Test generation
 
-Single input:
-
-```bash
-python -m eagle3_draft.test_generation \
-  --config configs/gemma4_example.yaml \
-  --checkpoint_path outputs/gemma4_eagle3_draft/checkpoint-500 \
-  --response_text "Create a chart showing monthly revenue"
-```
-
 Batch JSONL:
 
 ```bash
 python -m eagle3_draft.test_generation \
-  --config configs/gemma4_example.yaml \
-  --checkpoint_path outputs/gemma4_eagle3_draft/checkpoint-500 \
+  --config configs/gemma4_runtime.yaml \
+  --checkpoint_path outputs/gemma4_eagle3_draft/best-checkpoint \
   --input_jsonl data/raw/test.jsonl \
-  --output_jsonl outputs/predictions.jsonl
+  --output_jsonl outputs/gemma4_eagle3_draft/best-checkpoint/test_predictions.jsonl
+```
+
+Single input:
+
+```bash
+python -m eagle3_draft.test_generation \
+  --config configs/gemma4_runtime.yaml \
+  --checkpoint_path outputs/gemma4_eagle3_draft/best-checkpoint \
+  --response_text "Create a chart showing monthly revenue"
 ```
 
 ## Fine-tuning from an existing drafter checkpoint
 
-If you already have a trained drafter checkpoint and want to continue fine-tuning it, set:
+If you already have a trained drafter checkpoint and want to continue fine-tuning it, set this in the bash file:
 
-```yaml
-resume_draft_checkpoint_path: outputs/gemma4_eagle3_draft/checkpoint-500
+```bash
+RESUME_DRAFT_CHECKPOINT_PATH="outputs/gemma4_eagle3_draft/checkpoint-500"
 ```
 
 That path can be either a checkpoint folder or the direct file path to `draft_model.pt`.
