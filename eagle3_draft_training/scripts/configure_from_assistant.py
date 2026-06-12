@@ -1,14 +1,4 @@
 #!/usr/bin/env python
-"""Inspect target/assistant models and overwrite drafter config safely.
-
-Example:
-  python scripts/configure_from_assistant.py \
-    --assistant_model_path /home/c.kulkarni/hf_models/google/gemma-4-E2B-it-assistant \
-    --target_model_path /home/c.kulkarni/hf_models/google/gemma-4-E2B-it \
-    --config configs/gemma4_example.yaml \
-    --overwrite
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -19,14 +9,17 @@ from typing import Any
 import yaml
 from transformers import AutoConfig
 
+from eagle3_draft.config_utils import (
+    get_hidden_size,
+    get_intermediate_size,
+    get_num_attention_heads,
+    get_num_hidden_layers,
+    get_num_key_value_heads,
+    get_vocab_size,
+)
+
 
 def pick_layer_indices(num_layers: int) -> list[int]:
-    """Pick low/mid/high hidden-state indices for EAGLE-3-style fusion.
-
-    Hugging Face hidden_states usually includes embeddings at index 0 and layer
-    outputs from 1..num_hidden_layers. We avoid 0 and choose three internal
-    semantic levels.
-    """
     if num_layers < 3:
         raise ValueError(f"Need at least 3 hidden layers, got {num_layers}")
     candidates = [
@@ -49,7 +42,6 @@ def pick_layer_indices(num_layers: int) -> list[int]:
 
 
 def choose_draft_width(hidden_size: int) -> int:
-    """Choose a compact drafter width from target-model hidden size."""
     if hidden_size <= 1024:
         return hidden_size
     raw = min(2048, max(1024, hidden_size // 2))
@@ -65,9 +57,9 @@ def choose_num_heads(draft_hidden_size: int) -> int:
 
 def inspect_model(target_model_path: str, assistant_model_path: str | None, trust_remote_code: bool) -> dict[str, Any]:
     cfg = AutoConfig.from_pretrained(target_model_path, trust_remote_code=trust_remote_code)
-    hidden_size = int(getattr(cfg, "hidden_size"))
-    vocab_size = int(getattr(cfg, "vocab_size"))
-    num_layers = int(getattr(cfg, "num_hidden_layers"))
+    hidden_size = get_hidden_size(cfg)
+    vocab_size = get_vocab_size(cfg)
+    num_layers = get_num_hidden_layers(cfg)
     draft_hidden_size = choose_draft_width(hidden_size)
     draft_num_heads = choose_num_heads(draft_hidden_size)
     return {
@@ -76,9 +68,9 @@ def inspect_model(target_model_path: str, assistant_model_path: str | None, trus
         "target_hidden_size": hidden_size,
         "target_vocab_size": vocab_size,
         "target_num_hidden_layers": num_layers,
-        "target_num_attention_heads": getattr(cfg, "num_attention_heads", None),
-        "target_num_key_value_heads": getattr(cfg, "num_key_value_heads", None),
-        "target_intermediate_size": getattr(cfg, "intermediate_size", None),
+        "target_num_attention_heads": get_num_attention_heads(cfg),
+        "target_num_key_value_heads": get_num_key_value_heads(cfg),
+        "target_intermediate_size": get_intermediate_size(cfg),
         "recommended": {
             "assistant_model_path": assistant_model_path,
             "target_model_path": target_model_path,
@@ -106,7 +98,7 @@ def main() -> None:
     parser.add_argument("--assistant_model_path", default=None)
     parser.add_argument("--config", default="configs/gemma4_example.yaml")
     parser.add_argument("--trust_remote_code", action="store_true")
-    parser.add_argument("--overwrite", action="store_true", help="Overwrite the YAML config with recommended values.")
+    parser.add_argument("--overwrite", action="store_true")
     args = parser.parse_args()
 
     info = inspect_model(args.target_model_path, args.assistant_model_path, args.trust_remote_code)
