@@ -18,6 +18,7 @@ OUTPUT_DIR="outputs/gemma4_eagle3_draft"
 TOKENIZED_DATA_DIR="data/tokenized/gemma4"
 CONFIG_PATH="configs/gemma4_runtime.yaml"
 TENSORBOARD_LOG_DIR="${OUTPUT_DIR}/tensorboard"
+BEST_CHECKPOINT_DIR="${OUTPUT_DIR}/best-checkpoint"
 
 TRUST_REMOTE_CODE="true"
 AUTO_CONFIGURE_FROM_TARGET="true"
@@ -25,6 +26,7 @@ RUN_PREPARE_DATA="true"
 RUN_TRAIN="true"
 RUN_EVAL="true"
 RUN_TEST_GENERATION="false"
+SAVE_TEST_PREDICTIONS="true"
 
 MAX_LENGTH="2048"
 EVAL_RATIO="0.05"
@@ -55,11 +57,11 @@ SCHEDULED_SAMPLING_PROB="0.0"
 GRADIENT_CHECKPOINTING="true"
 
 RESUME_DRAFT_CHECKPOINT_PATH=""  # optional: outputs/gemma4_eagle3_draft/checkpoint-500 or draft_model.pt
-EVAL_CHECKPOINT_PATH=""          # optional. Empty means final checkpoint from OUTPUT_DIR.
+EVAL_CHECKPOINT_PATH=""          # optional. Empty means best-checkpoint.
 EVAL_DATA_DIR=""                 # optional. Empty means test split if TEST_JSONL exists, else eval split.
 GEN_RESPONSE_TEXT="Create a chart showing monthly revenue"
 GEN_INPUT_JSONL=""              # optional batch generation input
-GEN_OUTPUT_JSONL="${OUTPUT_DIR}/predictions.jsonl"
+GEN_OUTPUT_JSONL=""             # optional. Empty means best-checkpoint/test_predictions.jsonl
 GEN_MAX_NEW_TOKENS="256"
 
 # ============================================================
@@ -156,6 +158,10 @@ resolve_checkpoint() {
     echo "$EVAL_CHECKPOINT_PATH"
     return
   fi
+  if [[ -f "${BEST_CHECKPOINT_DIR}/draft_model.pt" ]]; then
+    echo "$BEST_CHECKPOINT_DIR"
+    return
+  fi
   latest=$(find "$OUTPUT_DIR" -maxdepth 1 -type d -name 'checkpoint-*' | sort -V | tail -n 1 || true)
   if [[ -z "$latest" ]]; then
     echo "No checkpoint found under $OUTPUT_DIR" >&2
@@ -185,14 +191,33 @@ if bool_flag "$RUN_EVAL"; then
     --data_dir "$DATA_DIR"
 fi
 
+if bool_flag "$SAVE_TEST_PREDICTIONS"; then
+  if [[ -n "$TEST_JSONL" ]]; then
+    CKPT=$(resolve_checkpoint)
+    mkdir -p "$CKPT"
+    python -m eagle3_draft.test_generation \
+      --config "$CONFIG_PATH" \
+      --checkpoint_path "$CKPT" \
+      --input_jsonl "$TEST_JSONL" \
+      --output_jsonl "${CKPT}/test_predictions.jsonl" \
+      --max_new_tokens "$GEN_MAX_NEW_TOKENS"
+  else
+    echo "SAVE_TEST_PREDICTIONS=true but TEST_JSONL is empty; skipping test prediction export."
+  fi
+fi
+
 if bool_flag "$RUN_TEST_GENERATION"; then
   CKPT=$(resolve_checkpoint)
   if [[ -n "$GEN_INPUT_JSONL" ]]; then
+    OUT_JSONL="$GEN_OUTPUT_JSONL"
+    if [[ -z "$OUT_JSONL" ]]; then
+      OUT_JSONL="${CKPT}/predictions.jsonl"
+    fi
     python -m eagle3_draft.test_generation \
       --config "$CONFIG_PATH" \
       --checkpoint_path "$CKPT" \
       --input_jsonl "$GEN_INPUT_JSONL" \
-      --output_jsonl "$GEN_OUTPUT_JSONL" \
+      --output_jsonl "$OUT_JSONL" \
       --max_new_tokens "$GEN_MAX_NEW_TOKENS"
   else
     python -m eagle3_draft.test_generation \
@@ -204,4 +229,5 @@ if bool_flag "$RUN_TEST_GENERATION"; then
 fi
 
 echo "Pipeline finished. Config used: $CONFIG_PATH"
+echo "Best checkpoint: $BEST_CHECKPOINT_DIR"
 echo "TensorBoard: tensorboard --logdir $TENSORBOARD_LOG_DIR"
