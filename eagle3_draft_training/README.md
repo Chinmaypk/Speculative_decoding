@@ -33,7 +33,8 @@ This implementation follows those ideas:
 - conditions on the previous token embedding;
 - trains a lightweight Transformer drafter to predict the target `genui_json` tokens;
 - supports supervised JSONL data with `response_text` as input and `genui_json` as output;
-- supports train/eval/test splits, TensorBoard logging, standalone evaluation, generation testing, target-model auto-configuration, and resuming/fine-tuning an existing drafter checkpoint.
+- splits only the training JSONL into train/eval and supports a separate held-out test JSONL;
+- supports TensorBoard logging, standalone evaluation, generation testing, target-model auto-configuration, and resuming/fine-tuning an existing drafter checkpoint.
 
 ## Folder layout
 
@@ -97,7 +98,7 @@ draft_intermediate_size
 
 The utility chooses low/mid/high hidden-state indices based on the target model `num_hidden_layers`, so you do not need to manually guess valid Gemma/Gemma-like layer indices.
 
-## Expected training data
+## Expected JSONL format
 
 Each JSONL line must be one JSON object with these keys:
 
@@ -109,26 +110,30 @@ Each JSONL line must be one JSON object with these keys:
 
 ## Prepare data
 
+Pass one JSONL for training. The script splits this into `train` and `eval` using `--eval_ratio`. Pass a second JSONL only when you want a separate held-out test set.
+
 ```bash
 python scripts/prepare_jsonl.py \
-  --assistant_model_path /home/c.kulkarni/hf_models/google/gemma-4-E2B-it \
-  --input_jsonl data/raw/train.jsonl \
+  --target_model_path /home/c.kulkarni/hf_models/google/gemma-4-E2B-it \
+  --train_jsonl data/raw/train.jsonl \
+  --test_jsonl data/raw/test.jsonl \
   --output_dir data/tokenized/gemma4 \
   --max_length 2048 \
   --eval_ratio 0.05 \
-  --test_ratio 0.05 \
   --trust_remote_code
 ```
 
-The preprocessing tokenizer should match the target model vocabulary. For your current paths, both are Gemma-family paths, but using `target_model_path` for tokenization is the safest choice.
+The preprocessing tokenizer should match the target model vocabulary, so use `target_model_path` here.
 
 This creates:
 
 ```text
-data/tokenized/gemma4/train/data.pt
-data/tokenized/gemma4/eval/data.pt
-data/tokenized/gemma4/test/data.pt
+data/tokenized/gemma4/train/data.pt   # from train_jsonl
+data/tokenized/gemma4/eval/data.pt    # split from train_jsonl
+data/tokenized/gemma4/test/data.pt    # from test_jsonl, if provided
 ```
+
+If `--test_jsonl` is omitted, only train/eval are created.
 
 ## Train with TensorBoard logging
 
