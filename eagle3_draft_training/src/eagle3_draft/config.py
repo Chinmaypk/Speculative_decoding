@@ -14,6 +14,11 @@ class Eagle3TrainingConfig:
     output_dir: str
     target_hidden_layer_indices: list[int]
 
+    eval_data_dir: str | None = None
+    test_data_dir: str | None = None
+    resume_draft_checkpoint_path: str | None = None
+    tensorboard_log_dir: str | None = None
+
     max_length: int = 2048
     draft_hidden_size: int = 1024
     draft_num_layers: int = 4
@@ -26,9 +31,11 @@ class Eagle3TrainingConfig:
     warmup_steps: int = 100
     gradient_accumulation_steps: int = 4
     per_device_train_batch_size: int = 1
+    per_device_eval_batch_size: int = 1
     num_train_epochs: int = 1
     max_steps: int = -1
     logging_steps: int = 10
+    eval_steps: int = 200
     save_steps: int = 500
     seed: int = 42
 
