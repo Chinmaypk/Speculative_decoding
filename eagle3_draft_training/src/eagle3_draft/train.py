@@ -159,8 +159,16 @@ def maybe_apply_scheduled_sampling(draft_logits: torch.Tensor, input_ids: torch.
         return sampled
 
 
-def save_checkpoint(accelerator: Accelerator, draft_model: Eagle3DraftModel, output_dir: str | Path, step: int, cfg: Eagle3TrainingConfig) -> None:
-    checkpoint_dir = Path(output_dir) / f"checkpoint-{step}"
+def save_checkpoint(
+    accelerator: Accelerator,
+    draft_model: Eagle3DraftModel,
+    output_dir: str | Path,
+    step: int,
+    cfg: Eagle3TrainingConfig,
+    checkpoint_name: str | None = None,
+    metrics: dict[str, float] | None = None,
+) -> Path:
+    checkpoint_dir = Path(output_dir) / (checkpoint_name or f"checkpoint-{step}")
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
     unwrapped = accelerator.unwrap_model(draft_model)
     accelerator.save(unwrapped.state_dict(), checkpoint_dir / "draft_model.pt")
@@ -168,6 +176,37 @@ def save_checkpoint(accelerator: Accelerator, draft_model: Eagle3DraftModel, out
     if accelerator.is_main_process:
         with open(checkpoint_dir / "training_config.json", "w", encoding="utf-8") as f:
             json.dump(cfg.to_dict(), f, indent=2)
+        if metrics is not None:
+            with open(checkpoint_dir / "best_metrics.json", "w", encoding="utf-8") as f:
+                json.dump({"step": step, **metrics}, f, indent=2)
+    return checkpoint_dir
+
+
+def maybe_save_best_checkpoint(
+    accelerator: Accelerator,
+    draft_model: Eagle3DraftModel,
+    cfg: Eagle3TrainingConfig,
+    metrics: dict[str, float],
+    step: int,
+    best_eval_loss: float,
+) -> float:
+    eval_loss = metrics.get("eval_loss")
+    if eval_loss is None:
+        return best_eval_loss
+    if eval_loss < best_eval_loss:
+        save_checkpoint(
+            accelerator,
+            draft_model,
+            cfg.output_dir,
+            step,
+            cfg,
+            checkpoint_name="best-checkpoint",
+            metrics=metrics,
+        )
+        if accelerator.is_main_process:
+            print(f"New best checkpoint at step {step}: eval_loss={eval_loss:.6f}")
+        return eval_loss
+    return best_eval_loss
 
 
 def make_loader(data_dir: str | None, tokenizer: AutoTokenizer, cfg: Eagle3TrainingConfig, train: bool) -> DataLoader | None:
@@ -234,6 +273,7 @@ def train(cfg: Eagle3TrainingConfig) -> None:
 
     global_step = 0
     completed_steps = 0
+    best_eval_loss = float("inf")
     progress = tqdm(total=total_steps, disable=not accelerator.is_main_process, desc="Training drafter")
 
     for _epoch in range(cfg.num_train_epochs):
@@ -281,6 +321,7 @@ def train(cfg: Eagle3TrainingConfig) -> None:
                     if accelerator.is_main_process and writer is not None:
                         for key, value in metrics.items():
                             writer.add_scalar(key.replace("eval_", "eval/"), value, global_step)
+                    best_eval_loss = maybe_save_best_checkpoint(accelerator, draft_model, cfg, metrics, global_step, best_eval_loss)
 
                 if cfg.save_steps > 0 and global_step % cfg.save_steps == 0:
                     save_checkpoint(accelerator, draft_model, cfg.output_dir, global_step, cfg)
@@ -290,6 +331,10 @@ def train(cfg: Eagle3TrainingConfig) -> None:
 
     progress.close()
     final_metrics = evaluate(accelerator, target_model, draft_model, eval_loader, cfg)
+    if final_metrics:
+        best_eval_loss = maybe_save_best_checkpoint(accelerator, draft_model, cfg, final_metrics, global_step, best_eval_loss)
+    else:
+        save_checkpoint(accelerator, draft_model, cfg.output_dir, global_step, cfg, checkpoint_name="best-checkpoint")
     save_checkpoint(accelerator, draft_model, cfg.output_dir, global_step, cfg)
     accelerator.wait_for_everyone()
 
@@ -299,6 +344,7 @@ def train(cfg: Eagle3TrainingConfig) -> None:
                 writer.add_scalar(key.replace("eval_", "eval/"), value, global_step)
             writer.close()
         print(f"Training complete. Final checkpoint saved under {cfg.output_dir}")
+        print(f"Best checkpoint saved under {Path(cfg.output_dir) / 'best-checkpoint'}")
         if final_metrics:
             print(json.dumps(final_metrics, indent=2))
 
