@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Inspect an assistant/target model and overwrite drafter config safely.
+"""Inspect an assistant model and overwrite drafter config safely.
 
 Example:
   python scripts/configure_from_assistant.py \
@@ -33,7 +33,6 @@ def pick_layer_indices(num_layers: int) -> list[int]:
         max(1, round(num_layers * 0.50)),
         max(1, round(num_layers * 0.85)),
     ]
-    # Deduplicate while keeping order and clamp to valid HF hidden-state indices.
     indices: list[int] = []
     for idx in candidates:
         idx = min(max(1, idx), num_layers)
@@ -49,10 +48,9 @@ def pick_layer_indices(num_layers: int) -> list[int]:
 
 
 def choose_draft_width(hidden_size: int) -> int:
-    """Choose a compact drafter width from target hidden size."""
+    """Choose a compact drafter width from assistant-model hidden size."""
     if hidden_size <= 1024:
         return hidden_size
-    # Keep drafter compact but divisible by common attention-head counts.
     raw = min(2048, max(1024, hidden_size // 2))
     return int(math.ceil(raw / 128) * 128)
 
@@ -64,8 +62,8 @@ def choose_num_heads(draft_hidden_size: int) -> int:
     return 1
 
 
-def inspect_model(model_path: str, trust_remote_code: bool) -> dict[str, Any]:
-    cfg = AutoConfig.from_pretrained(model_path, trust_remote_code=trust_remote_code)
+def inspect_model(assistant_model_path: str, trust_remote_code: bool) -> dict[str, Any]:
+    cfg = AutoConfig.from_pretrained(assistant_model_path, trust_remote_code=trust_remote_code)
     hidden_size = int(getattr(cfg, "hidden_size"))
     vocab_size = int(getattr(cfg, "vocab_size"))
     num_layers = int(getattr(cfg, "num_hidden_layers"))
@@ -74,14 +72,14 @@ def inspect_model(model_path: str, trust_remote_code: bool) -> dict[str, Any]:
     return {
         "model_type": getattr(cfg, "model_type", None),
         "architectures": getattr(cfg, "architectures", None),
-        "target_hidden_size": hidden_size,
-        "target_vocab_size": vocab_size,
-        "target_num_hidden_layers": num_layers,
-        "target_num_attention_heads": getattr(cfg, "num_attention_heads", None),
-        "target_num_key_value_heads": getattr(cfg, "num_key_value_heads", None),
-        "target_intermediate_size": getattr(cfg, "intermediate_size", None),
+        "assistant_hidden_size": hidden_size,
+        "assistant_vocab_size": vocab_size,
+        "assistant_num_hidden_layers": num_layers,
+        "assistant_num_attention_heads": getattr(cfg, "num_attention_heads", None),
+        "assistant_num_key_value_heads": getattr(cfg, "num_key_value_heads", None),
+        "assistant_intermediate_size": getattr(cfg, "intermediate_size", None),
         "recommended": {
-            "model_name_or_path": model_path,
+            "assistant_model_path": assistant_model_path,
             "target_hidden_layer_indices": pick_layer_indices(num_layers),
             "draft_hidden_size": draft_hidden_size,
             "draft_num_heads": draft_num_heads,
@@ -94,6 +92,7 @@ def inspect_model(model_path: str, trust_remote_code: bool) -> dict[str, Any]:
 def update_yaml_config(config_path: Path, model_info: dict[str, Any]) -> None:
     with open(config_path, "r", encoding="utf-8") as f:
         config = yaml.safe_load(f) or {}
+    config.pop("model_name_or_path", None)
     config.update(model_info["recommended"])
     with open(config_path, "w", encoding="utf-8") as f:
         yaml.safe_dump(config, f, sort_keys=False)
