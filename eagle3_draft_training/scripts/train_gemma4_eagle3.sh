@@ -56,6 +56,7 @@ GRADIENT_CHECKPOINTING="true"
 
 RESUME_DRAFT_CHECKPOINT_PATH=""  # optional: outputs/gemma4_eagle3_draft/checkpoint-500 or draft_model.pt
 EVAL_CHECKPOINT_PATH=""          # optional. Empty means final checkpoint from OUTPUT_DIR.
+EVAL_DATA_DIR=""                 # optional. Empty means test split if TEST_JSONL exists, else eval split.
 GEN_RESPONSE_TEXT="Create a chart showing monthly revenue"
 GEN_INPUT_JSONL=""              # optional batch generation input
 GEN_OUTPUT_JSONL="${OUTPUT_DIR}/predictions.jsonl"
@@ -163,12 +164,25 @@ resolve_checkpoint() {
   echo "$latest"
 }
 
+resolve_eval_data_dir() {
+  if [[ -n "$EVAL_DATA_DIR" ]]; then
+    echo "$EVAL_DATA_DIR"
+    return
+  fi
+  if [[ -n "$TEST_JSONL" && -f "${TOKENIZED_DATA_DIR}/test/data.pt" ]]; then
+    echo "${TOKENIZED_DATA_DIR}/test"
+    return
+  fi
+  echo "${TOKENIZED_DATA_DIR}/eval"
+}
+
 if bool_flag "$RUN_EVAL"; then
   CKPT=$(resolve_checkpoint)
+  DATA_DIR=$(resolve_eval_data_dir)
   python -m eagle3_draft.eval \
     --config "$CONFIG_PATH" \
     --checkpoint_path "$CKPT" \
-    --data_dir "${TOKENIZED_DATA_DIR}/test"
+    --data_dir "$DATA_DIR"
 fi
 
 if bool_flag "$RUN_TEST_GENERATION"; then
