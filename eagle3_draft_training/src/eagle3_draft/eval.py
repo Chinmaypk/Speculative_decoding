@@ -38,14 +38,14 @@ def load_draft_model(target_model: torch.nn.Module, cfg: Eagle3TrainingConfig, c
 @torch.no_grad()
 def run_eval(cfg: Eagle3TrainingConfig, checkpoint_path: str, data_dir: str) -> dict[str, float]:
     accelerator = Accelerator(mixed_precision="bf16" if cfg.bf16 else "fp16" if cfg.fp16 else "no")
-    assistant_model_path = cfg.resolved_assistant_model_path
-    tokenizer = AutoTokenizer.from_pretrained(assistant_model_path, trust_remote_code=cfg.trust_remote_code, use_fast=True)
+    target_model_path = cfg.resolved_target_model_path
+    tokenizer = AutoTokenizer.from_pretrained(target_model_path, trust_remote_code=cfg.trust_remote_code, use_fast=True)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
     dtype = torch.bfloat16 if cfg.bf16 else torch.float16 if cfg.fp16 else torch.float32
     target_model = AutoModelForCausalLM.from_pretrained(
-        assistant_model_path,
+        target_model_path,
         torch_dtype=dtype,
         trust_remote_code=cfg.trust_remote_code,
         output_hidden_states=True,
