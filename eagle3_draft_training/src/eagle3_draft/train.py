@@ -197,13 +197,14 @@ def train(cfg: Eagle3TrainingConfig) -> None:
         log_dir = cfg.tensorboard_log_dir or str(Path(cfg.output_dir) / "tensorboard")
         writer = SummaryWriter(log_dir=log_dir)
 
-    tokenizer = AutoTokenizer.from_pretrained(cfg.model_name_or_path, trust_remote_code=cfg.trust_remote_code, use_fast=True)
+    assistant_model_path = cfg.resolved_assistant_model_path
+    tokenizer = AutoTokenizer.from_pretrained(assistant_model_path, trust_remote_code=cfg.trust_remote_code, use_fast=True)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
     dtype = torch.bfloat16 if cfg.bf16 else torch.float16 if cfg.fp16 else torch.float32
     target_model = AutoModelForCausalLM.from_pretrained(
-        cfg.model_name_or_path,
+        assistant_model_path,
         torch_dtype=dtype,
         trust_remote_code=cfg.trust_remote_code,
         output_hidden_states=True,
