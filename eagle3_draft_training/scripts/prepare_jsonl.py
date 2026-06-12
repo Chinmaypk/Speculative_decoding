@@ -83,7 +83,7 @@ def save_split(examples: list[dict[str, Any]], output_dir: Path, name: str) -> N
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model_name_or_path", required=True)
+    parser.add_argument("--assistant_model_path", required=True, help="Frozen assistant/target model path used for tokenization.")
     parser.add_argument("--input_jsonl", required=True)
     parser.add_argument("--output_dir", required=True)
     parser.add_argument("--max_length", type=int, default=2048)
@@ -98,7 +98,7 @@ def main() -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     tokenizer = AutoTokenizer.from_pretrained(
-        args.model_name_or_path,
+        args.assistant_model_path,
         trust_remote_code=args.trust_remote_code,
         use_fast=True,
     )
