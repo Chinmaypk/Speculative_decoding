@@ -50,8 +50,11 @@ class Eagle3DraftModel(nn.Module):
     ) -> torch.Tensor:
         if len(selected_hidden_states) != len(self.hidden_projections):
             raise ValueError(f"Expected {len(self.hidden_projections)} hidden states, got {len(selected_hidden_states)}")
+        projection_dtype = self.token_projection.weight.dtype
+        previous_token_embeddings = previous_token_embeddings.to(dtype=projection_dtype)
         fused = self.token_projection(previous_token_embeddings)
         for hidden, projection in zip(selected_hidden_states, self.hidden_projections):
+            hidden = hidden.to(dtype=projection.weight.dtype)
             fused = fused + projection(hidden)
         fused = self.fusion_norm(fused / (len(selected_hidden_states) + 1))
         seq_len = fused.size(1)

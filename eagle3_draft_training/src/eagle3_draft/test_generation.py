@@ -87,11 +87,12 @@ def main() -> None:
         trust_remote_code=cfg.trust_remote_code,
         output_hidden_states=True,
     )
-    target_model.eval().cuda() if torch.cuda.is_available() else target_model.eval()
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    target_model.eval().to(device)
     target_model.requires_grad_(False)
     draft_model = load_draft_model(target_model, cfg, args.checkpoint_path)
-    if torch.cuda.is_available():
-        draft_model.cuda()
+    draft_dtype = dtype if device.type == "cuda" else torch.float32
+    draft_model.to(device=device, dtype=draft_dtype)
 
     if args.response_text:
         print(greedy_generate(target_model, draft_model, tokenizer, cfg, args.response_text, args.max_new_tokens, args.system_prompt))
